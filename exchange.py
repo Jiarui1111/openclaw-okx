@@ -11,10 +11,11 @@ from config import OkxConfig
 class OkxDemoClient:
     def __init__(self, config: OkxConfig) -> None:
         self._account_api = Account.AccountAPI(
-            config.api_key,
-            config.secret_key,
-            config.passphrase,
-            config.flag,
+            api_key=config.api_key,
+            api_secret_key=config.secret_key,
+            passphrase=config.passphrase,
+            use_server_time=config.use_server_time,
+            flag=config.flag,
             debug=False,
         )
         self._market_api = MarketData.MarketAPI(flag=config.flag)
