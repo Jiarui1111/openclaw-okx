@@ -6,6 +6,7 @@ from typing import Any
 
 from config import load_config
 from exchange import OkxDemoClient
+from signals import load_signal
 
 
 LOG_DIR = Path("logs")
@@ -171,6 +172,7 @@ def main() -> None:
     logger = configure_logging()
     config = load_config()
     client = OkxDemoClient(config)
+    signal = load_signal(config)
 
     balance_rows = client.fetch_balance()
     positions = client.fetch_positions("SWAP")
@@ -196,12 +198,12 @@ def main() -> None:
     order_plan = build_order_plan(
         instrument_id=config.instrument_id,
         trade_mode=config.trade_mode,
-        side=config.order_side,
-        size_contracts=config.order_size_contracts,
+        side=signal.action,
+        size_contracts=signal.size_contracts,
         instrument=instrument,
         ticker=ticker,
     )
-    position_side = infer_position_side(config.order_side, account_config)
+    position_side = infer_position_side(signal.action, account_config)
 
     logger.info("OKX connectivity check succeeded.")
     log_event(
@@ -211,6 +213,15 @@ def main() -> None:
         instrument_id=config.instrument_id,
         trade_mode=config.trade_mode,
         dry_run=config.dry_run,
+    )
+    log_event(
+        logger,
+        "signal_loaded",
+        source=signal.source,
+        action=signal.action,
+        size_contracts=f"{signal.size_contracts:.2f}",
+        confidence=f"{signal.confidence:.2f}",
+        reason=signal.reason,
     )
     logger.info("Simulated trading: %s", config.simulated_trading)
     logger.info("Balance rows returned: %s", len(balance_rows))
@@ -285,33 +296,34 @@ def main() -> None:
         notional_usd=f"{order_plan['notional_usd']:.2f}",
         reference_price=f"{order_plan['reference_price']:.2f}",
         mode="dry_run" if config.dry_run else "live",
+        signal_source=signal.source,
     )
 
     max_contracts_for_side = (
         max_order_size.get("max_buy_contracts", 0.0)
-        if config.order_side == "buy"
+        if signal.action == "buy"
         else max_order_size.get("max_sell_contracts", 0.0)
     )
-    if max_contracts_for_side and config.order_size_contracts > max_contracts_for_side:
+    if max_contracts_for_side and signal.size_contracts > max_contracts_for_side:
         logger.warning(
             "Configured order size %.2f exceeds current max size %.2f for side=%s",
-            config.order_size_contracts,
+            signal.size_contracts,
             max_contracts_for_side,
-            config.order_side,
+            signal.action,
         )
         log_event(
             logger,
             "order_plan_rejected",
             reason="size_exceeds_max",
-            configured_size=f"{config.order_size_contracts:.2f}",
+            configured_size=f"{signal.size_contracts:.2f}",
             max_size=f"{max_contracts_for_side:.2f}",
-            side=config.order_side,
+            side=signal.action,
         )
     elif config.dry_run:
         logger.info(
             "Dry-run order plan ready: side=%s size_contracts=%.2f estimated_notional_usd=%.2f",
-            config.order_side,
-            config.order_size_contracts,
+            signal.action,
+            signal.size_contracts,
             order_plan["notional_usd"],
         )
     elif not config.simulated_trading:
@@ -320,8 +332,8 @@ def main() -> None:
             logger,
             "order_execution_blocked",
             reason="not_in_demo_mode",
-            side=config.order_side,
-            size_contracts=f"{config.order_size_contracts:.2f}",
+            side=signal.action,
+            size_contracts=f"{signal.size_contracts:.2f}",
         )
     elif not config.allow_live_demo_orders:
         logger.warning("Live demo order blocked because OPENCLAW_ALLOW_LIVE_DEMO_ORDERS is false.")
@@ -329,32 +341,33 @@ def main() -> None:
             logger,
             "order_execution_blocked",
             reason="live_demo_orders_disabled",
-            side=config.order_side,
-            size_contracts=f"{config.order_size_contracts:.2f}",
+            side=signal.action,
+            size_contracts=f"{signal.size_contracts:.2f}",
         )
     else:
         order_result = client.place_market_order(
             instrument_id=config.instrument_id,
             trade_mode=config.trade_mode,
-            side=config.order_side,
-            size_contracts=config.order_size_contracts,
+            side=signal.action,
+            size_contracts=signal.size_contracts,
             position_side=position_side,
         )
         logger.info(
             "Live demo order placed: ordId=%s clOrdId=%s side=%s size_contracts=%.2f",
             order_result.get("ordId"),
             order_result.get("clOrdId"),
-            config.order_side,
-            config.order_size_contracts,
+            signal.action,
+            signal.size_contracts,
         )
         log_event(
             logger,
             "order_submitted",
             ord_id=order_result.get("ordId", ""),
             cl_ord_id=order_result.get("clOrdId", ""),
-            side=config.order_side,
-            size_contracts=f"{config.order_size_contracts:.2f}",
+            side=signal.action,
+            size_contracts=f"{signal.size_contracts:.2f}",
             position_side=position_side or "net",
+            signal_source=signal.source,
         )
     logger.info(
         "Open swap positions: count=%s total_notional_usd=%.2f",
