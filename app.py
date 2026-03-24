@@ -76,6 +76,43 @@ def summarize_positions(positions: list[dict[str, str]]) -> tuple[list[dict[str,
     return summary, total_notional
 
 
+def summarize_account_config(account_config_rows: list[dict[str, str]]) -> dict[str, str]:
+    if not account_config_rows:
+        return {}
+
+    config = account_config_rows[0]
+    return {
+        "account_level": config.get("acctLv", ""),
+        "position_mode": config.get("posMode", ""),
+        "auto_loan": str(config.get("autoLoan", "")),
+        "greeks_type": config.get("greeksType", ""),
+        "level": config.get("level", ""),
+        "contract_isolated_mode": config.get("ctIsoMode", ""),
+        "margin_isolated_mode": config.get("mgnIsoMode", ""),
+    }
+
+
+def infer_trade_mode(account_config: dict[str, str], positions: list[dict[str, str]]) -> str:
+    for position in positions:
+        trade_mode = position.get("mgnMode")
+        if trade_mode:
+            return trade_mode
+    return "cross"
+
+
+def summarize_size_rows(rows: list[dict[str, str]]) -> dict[str, float]:
+    if not rows:
+        return {}
+
+    row = rows[0]
+    return {
+        "max_buy_contracts": _to_float(row.get("maxBuy")),
+        "max_sell_contracts": _to_float(row.get("maxSell")),
+        "avail_buy_contracts": _to_float(row.get("availBuy")),
+        "avail_sell_contracts": _to_float(row.get("availSell")),
+    }
+
+
 def main() -> None:
     logger = configure_logging()
     config = load_config()
@@ -83,10 +120,23 @@ def main() -> None:
 
     balance_rows = client.fetch_balance()
     positions = client.fetch_positions("SWAP")
+    account_config_rows = client.fetch_account_config()
     ticker = client.fetch_ticker("BTC-USDT-SWAP")
     instrument = client.fetch_instrument("BTC-USDT-SWAP", "SWAP")
     balance_summary = summarize_balance(balance_rows)
     position_summary, total_position_notional = summarize_positions(positions)
+    account_config = summarize_account_config(account_config_rows)
+    trade_mode = infer_trade_mode(account_config, positions)
+    max_order_size = summarize_size_rows(
+        client.fetch_max_order_size(
+            "BTC-USDT-SWAP",
+            trade_mode,
+            leverage=instrument.get("lever"),
+        )
+    )
+    max_available_size = summarize_size_rows(
+        client.fetch_max_available_size("BTC-USDT-SWAP", trade_mode)
+    )
     contract_value = _to_float(instrument.get("ctVal"))
     contract_multiplier = _to_float(instrument.get("ctMult")) or 1.0
 
@@ -121,6 +171,25 @@ def main() -> None:
         instrument.get("lotSz"),
         instrument.get("minSz"),
         instrument.get("lever"),
+    )
+    logger.info(
+        "Account config:"
+        " account_level=%s position_mode=%s contract_isolated_mode=%s margin_isolated_mode=%s auto_loan=%s",
+        account_config.get("account_level", ""),
+        account_config.get("position_mode", ""),
+        account_config.get("contract_isolated_mode", ""),
+        account_config.get("margin_isolated_mode", ""),
+        account_config.get("auto_loan", ""),
+    )
+    logger.info(
+        "Order sizing:"
+        " trade_mode=%s max_buy_contracts=%.2f max_sell_contracts=%.2f"
+        " avail_buy_contracts=%.2f avail_sell_contracts=%.2f",
+        trade_mode,
+        max_order_size.get("max_buy_contracts", 0.0),
+        max_order_size.get("max_sell_contracts", 0.0),
+        max_available_size.get("avail_buy_contracts", 0.0),
+        max_available_size.get("avail_sell_contracts", 0.0),
     )
     logger.info(
         "Open swap positions: count=%s total_notional_usd=%.2f",

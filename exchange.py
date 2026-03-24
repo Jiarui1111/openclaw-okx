@@ -32,6 +32,33 @@ class OkxDemoClient:
         self._raise_if_error(response, f"fetch positions for {instrument_type}")
         return response.get("data", [])
 
+    def fetch_account_config(self) -> list[dict[str, Any]]:
+        response = self._account_api.get_account_config()
+        self._raise_if_error(response, "fetch account config")
+        return response.get("data", [])
+
+    def fetch_max_order_size(
+        self,
+        instrument_id: str,
+        trade_mode: str,
+        leverage: str | None = None,
+    ) -> list[dict[str, Any]]:
+        kwargs: dict[str, Any] = {"instId": instrument_id, "tdMode": trade_mode}
+        if leverage:
+            kwargs["leverage"] = leverage
+        response = self._account_api.get_max_order_size(**kwargs)
+        self._raise_if_error(response, f"fetch max order size for {instrument_id}")
+        return response.get("data", [])
+
+    def fetch_max_available_size(
+        self,
+        instrument_id: str,
+        trade_mode: str,
+    ) -> list[dict[str, Any]]:
+        response = self._account_api.get_max_avail_size(instId=instrument_id, tdMode=trade_mode)
+        self._raise_if_error(response, f"fetch max available size for {instrument_id}")
+        return response.get("data", [])
+
     def fetch_ticker(self, instrument_id: str) -> dict[str, Any]:
         response = self._market_api.get_ticker(instId=instrument_id)
         self._raise_if_error(response, f"fetch ticker for {instrument_id}")
