@@ -66,6 +66,8 @@ def summarize_positions(positions: list[dict[str, str]]) -> tuple[list[dict[str,
                 "mark_price": mark_price,
                 "notional_usd": notional,
                 "margin_usd": _to_float(position.get("margin")),
+                "initial_margin_usd": _to_float(position.get("imr")),
+                "maintenance_margin_usd": _to_float(position.get("mmr")),
                 "upl_usd": _to_float(position.get("upl")),
                 "avg_px": _to_float(position.get("avgPx")),
                 "liquidation_px": _to_float(position.get("liqPx")),
@@ -111,6 +113,22 @@ def summarize_size_rows(rows: list[dict[str, str]]) -> dict[str, float]:
         "avail_buy_contracts": _to_float(row.get("availBuy")),
         "avail_sell_contracts": _to_float(row.get("availSell")),
     }
+
+
+def estimate_margin_used(position: dict[str, float | str]) -> float:
+    direct_margin = float(position["margin_usd"])
+    if direct_margin > 0:
+        return direct_margin
+
+    initial_margin = float(position["initial_margin_usd"])
+    if initial_margin > 0:
+        return initial_margin
+
+    leverage = float(position["reported_leverage"])
+    if leverage > 0:
+        return float(position["notional_usd"]) / leverage
+
+    return 0.0
 
 
 def main() -> None:
@@ -192,6 +210,20 @@ def main() -> None:
         max_available_size.get("avail_sell_contracts", 0.0),
     )
     logger.info(
+        "Order sizing notionals:"
+        " max_buy_coin=%.4f max_sell_coin=%.4f avail_buy_coin=%.4f avail_sell_coin=%.4f"
+        " max_buy_notional_usd=%.2f max_sell_notional_usd=%.2f"
+        " avail_buy_notional_usd=%.2f avail_sell_notional_usd=%.2f",
+        max_order_size.get("max_buy_contracts", 0.0) * contract_value * contract_multiplier,
+        max_order_size.get("max_sell_contracts", 0.0) * contract_value * contract_multiplier,
+        max_available_size.get("avail_buy_contracts", 0.0) * contract_value * contract_multiplier,
+        max_available_size.get("avail_sell_contracts", 0.0) * contract_value * contract_multiplier,
+        max_order_size.get("max_buy_contracts", 0.0) * contract_value * contract_multiplier * _to_float(ticker.get("last")),
+        max_order_size.get("max_sell_contracts", 0.0) * contract_value * contract_multiplier * _to_float(ticker.get("last")),
+        max_available_size.get("avail_buy_contracts", 0.0) * contract_value * contract_multiplier * _to_float(ticker.get("last")),
+        max_available_size.get("avail_sell_contracts", 0.0) * contract_value * contract_multiplier * _to_float(ticker.get("last")),
+    )
+    logger.info(
         "Open swap positions: count=%s total_notional_usd=%.2f",
         len(position_summary),
         total_position_notional,
@@ -202,15 +234,12 @@ def main() -> None:
         return
 
     for position in position_summary:
-        estimated_leverage = (
-            position["notional_usd"] / position["margin_usd"]
-            if position["margin_usd"]
-            else 0.0
-        )
+        effective_margin = estimate_margin_used(position)
+        estimated_leverage = position["notional_usd"] / effective_margin if effective_margin else 0.0
         coin_exposure = position["contracts"] * contract_value * contract_multiplier
         logger.info(
             "Position %s side=%s contracts=%s avg_px=%.2f mark_price=%.2f"
-            " notional_usd=%.2f margin_usd=%.2f upl_usd=%.2f"
+            " notional_usd=%.2f margin_usd=%.2f initial_margin_usd=%.2f maintenance_margin_usd=%.2f upl_usd=%.2f"
             " coin_exposure=%s estimated_leverage=%.2f reported_leverage=%.2f liquidation_px=%.2f",
             position["instId"],
             position["side"],
@@ -218,7 +247,9 @@ def main() -> None:
             position["avg_px"],
             position["mark_price"],
             position["notional_usd"],
-            position["margin_usd"],
+            effective_margin,
+            position["initial_margin_usd"],
+            position["maintenance_margin_usd"],
             position["upl_usd"],
             coin_exposure,
             estimated_leverage,
