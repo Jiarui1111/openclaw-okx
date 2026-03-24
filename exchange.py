@@ -25,6 +25,11 @@ class OkxDemoClient:
         self._raise_if_error(response, "fetch account balance")
         return response.get("data", [])
 
+    def fetch_positions(self, instrument_type: str = "SWAP") -> list[dict[str, Any]]:
+        response = self._account_api.get_positions(instType=instrument_type)
+        self._raise_if_error(response, f"fetch positions for {instrument_type}")
+        return response.get("data", [])
+
     def fetch_ticker(self, instrument_id: str) -> dict[str, Any]:
         response = self._market_api.get_ticker(instId=instrument_id)
         self._raise_if_error(response, f"fetch ticker for {instrument_id}")
