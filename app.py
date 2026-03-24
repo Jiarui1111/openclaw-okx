@@ -56,7 +56,7 @@ def summarize_positions(positions: list[dict[str, str]]) -> tuple[list[dict[str,
             continue
 
         mark_price = _to_float(position.get("markPx"))
-        notional = abs(size) * mark_price
+        notional = _to_float(position.get("notionalUsd"))
         total_notional += notional
         summary.append(
             {
@@ -67,6 +67,9 @@ def summarize_positions(positions: list[dict[str, str]]) -> tuple[list[dict[str,
                 "notional_usd": notional,
                 "margin_usd": _to_float(position.get("margin")),
                 "upl_usd": _to_float(position.get("upl")),
+                "avg_px": _to_float(position.get("avgPx")),
+                "liquidation_px": _to_float(position.get("liqPx")),
+                "reported_leverage": _to_float(position.get("lever")),
             }
         )
 
@@ -81,8 +84,11 @@ def main() -> None:
     balance_rows = client.fetch_balance()
     positions = client.fetch_positions("SWAP")
     ticker = client.fetch_ticker("BTC-USDT-SWAP")
+    instrument = client.fetch_instrument("BTC-USDT-SWAP", "SWAP")
     balance_summary = summarize_balance(balance_rows)
     position_summary, total_position_notional = summarize_positions(positions)
+    contract_value = _to_float(instrument.get("ctVal"))
+    contract_multiplier = _to_float(instrument.get("ctMult")) or 1.0
 
     logger.info("OKX connectivity check succeeded.")
     logger.info("Simulated trading: %s", config.simulated_trading)
@@ -107,6 +113,16 @@ def main() -> None:
         balance_summary.get("isolated_margin_used_usd", 0.0),
     )
     logger.info(
+        "Instrument BTC-USDT-SWAP:"
+        " ctVal=%s ctValCcy=%s ctMult=%s lotSz=%s minSz=%s lever=%s",
+        instrument.get("ctVal"),
+        instrument.get("ctValCcy"),
+        instrument.get("ctMult"),
+        instrument.get("lotSz"),
+        instrument.get("minSz"),
+        instrument.get("lever"),
+    )
+    logger.info(
         "Open swap positions: count=%s total_notional_usd=%.2f",
         len(position_summary),
         total_position_notional,
@@ -117,15 +133,28 @@ def main() -> None:
         return
 
     for position in position_summary:
+        estimated_leverage = (
+            position["notional_usd"] / position["margin_usd"]
+            if position["margin_usd"]
+            else 0.0
+        )
+        coin_exposure = position["contracts"] * contract_value * contract_multiplier
         logger.info(
-            "Position %s side=%s contracts=%s mark_price=%.2f notional_usd=%.2f margin_usd=%.2f upl_usd=%.2f",
+            "Position %s side=%s contracts=%s avg_px=%.2f mark_price=%.2f"
+            " notional_usd=%.2f margin_usd=%.2f upl_usd=%.2f"
+            " coin_exposure=%s estimated_leverage=%.2f reported_leverage=%.2f liquidation_px=%.2f",
             position["instId"],
             position["side"],
             position["contracts"],
+            position["avg_px"],
             position["mark_price"],
             position["notional_usd"],
             position["margin_usd"],
             position["upl_usd"],
+            coin_exposure,
+            estimated_leverage,
+            position["reported_leverage"],
+            position["liquidation_px"],
         )
 
 

@@ -4,6 +4,7 @@ from typing import Any
 
 from okx import Account
 from okx import MarketData
+from okx import PublicData
 
 from config import OkxConfig
 
@@ -19,6 +20,7 @@ class OkxDemoClient:
             debug=False,
         )
         self._market_api = MarketData.MarketAPI(flag=config.flag)
+        self._public_api = PublicData.PublicAPI(flag=config.flag)
 
     def fetch_balance(self) -> list[dict[str, Any]]:
         response = self._account_api.get_account_balance()
@@ -36,6 +38,14 @@ class OkxDemoClient:
         data = response.get("data", [])
         if not data:
             raise RuntimeError(f"No ticker data returned for {instrument_id}")
+        return data[0]
+
+    def fetch_instrument(self, instrument_id: str, instrument_type: str = "SWAP") -> dict[str, Any]:
+        response = self._public_api.get_instruments(instType=instrument_type, instId=instrument_id)
+        self._raise_if_error(response, f"fetch instrument details for {instrument_id}")
+        data = response.get("data", [])
+        if not data:
+            raise RuntimeError(f"No instrument details returned for {instrument_id}")
         return data[0]
 
     @staticmethod
