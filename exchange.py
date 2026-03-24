@@ -43,10 +43,24 @@ class OkxDemoClient:
         trade_mode: str,
         leverage: str | None = None,
     ) -> list[dict[str, Any]]:
-        kwargs: dict[str, Any] = {"instId": instrument_id, "tdMode": trade_mode}
+        response = None
         if leverage:
-            kwargs["leverage"] = leverage
-        response = self._account_api.get_max_order_size(**kwargs)
+            try:
+                response = self._account_api.get_max_order_size(
+                    instId=instrument_id,
+                    tdMode=trade_mode,
+                    lever=leverage,
+                )
+            except TypeError:
+                response = self._account_api.get_max_order_size(
+                    instId=instrument_id,
+                    tdMode=trade_mode,
+                )
+        else:
+            response = self._account_api.get_max_order_size(
+                instId=instrument_id,
+                tdMode=trade_mode,
+            )
         self._raise_if_error(response, f"fetch max order size for {instrument_id}")
         return response.get("data", [])
 
