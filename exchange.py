@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-import okx.Account as Account
-import okx.MarketData as MarketData
+from okx import Account
+from okx import MarketData
 
 from config import OkxConfig
 
@@ -14,8 +14,8 @@ class OkxDemoClient:
             config.api_key,
             config.secret_key,
             config.passphrase,
-            config.use_server_time,
             config.flag,
+            debug=False,
         )
         self._market_api = MarketData.MarketAPI(flag=config.flag)
 
