@@ -161,6 +161,12 @@ def build_order_plan(
     }
 
 
+def infer_position_side(side: str, account_config: dict[str, str]) -> str | None:
+    if account_config.get("position_mode") != "long_short_mode":
+        return None
+    return "long" if side == "buy" else "short"
+
+
 def main() -> None:
     logger = configure_logging()
     config = load_config()
@@ -195,6 +201,7 @@ def main() -> None:
         instrument=instrument,
         ticker=ticker,
     )
+    position_side = infer_position_side(config.order_side, account_config)
 
     logger.info("OKX connectivity check succeeded.")
     log_event(
@@ -306,6 +313,48 @@ def main() -> None:
             config.order_side,
             config.order_size_contracts,
             order_plan["notional_usd"],
+        )
+    elif not config.simulated_trading:
+        logger.warning("Live order blocked because simulated trading is disabled.")
+        log_event(
+            logger,
+            "order_execution_blocked",
+            reason="not_in_demo_mode",
+            side=config.order_side,
+            size_contracts=f"{config.order_size_contracts:.2f}",
+        )
+    elif not config.allow_live_demo_orders:
+        logger.warning("Live demo order blocked because OPENCLAW_ALLOW_LIVE_DEMO_ORDERS is false.")
+        log_event(
+            logger,
+            "order_execution_blocked",
+            reason="live_demo_orders_disabled",
+            side=config.order_side,
+            size_contracts=f"{config.order_size_contracts:.2f}",
+        )
+    else:
+        order_result = client.place_market_order(
+            instrument_id=config.instrument_id,
+            trade_mode=config.trade_mode,
+            side=config.order_side,
+            size_contracts=config.order_size_contracts,
+            position_side=position_side,
+        )
+        logger.info(
+            "Live demo order placed: ordId=%s clOrdId=%s side=%s size_contracts=%.2f",
+            order_result.get("ordId"),
+            order_result.get("clOrdId"),
+            config.order_side,
+            config.order_size_contracts,
+        )
+        log_event(
+            logger,
+            "order_submitted",
+            ord_id=order_result.get("ordId", ""),
+            cl_ord_id=order_result.get("clOrdId", ""),
+            side=config.order_side,
+            size_contracts=f"{config.order_size_contracts:.2f}",
+            position_side=position_side or "net",
         )
     logger.info(
         "Open swap positions: count=%s total_notional_usd=%.2f",

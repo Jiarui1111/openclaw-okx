@@ -5,6 +5,7 @@ from typing import Any
 from okx import Account
 from okx import MarketData
 from okx import PublicData
+from okx import Trade
 
 from config import OkxConfig
 
@@ -21,6 +22,14 @@ class OkxDemoClient:
         )
         self._market_api = MarketData.MarketAPI(flag=config.flag)
         self._public_api = PublicData.PublicAPI(flag=config.flag)
+        self._trade_api = Trade.TradeAPI(
+            api_key=config.api_key,
+            api_secret_key=config.secret_key,
+            passphrase=config.passphrase,
+            use_server_time=config.use_server_time,
+            flag=config.flag,
+            debug=False,
+        )
 
     def fetch_balance(self) -> list[dict[str, Any]]:
         response = self._account_api.get_account_balance()
@@ -87,6 +96,30 @@ class OkxDemoClient:
         data = response.get("data", [])
         if not data:
             raise RuntimeError(f"No instrument details returned for {instrument_id}")
+        return data[0]
+
+    def place_market_order(
+        self,
+        instrument_id: str,
+        trade_mode: str,
+        side: str,
+        size_contracts: float,
+        position_side: str | None = None,
+    ) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "instId": instrument_id,
+            "tdMode": trade_mode,
+            "side": side,
+            "ordType": "market",
+            "sz": f"{size_contracts}",
+        }
+        if position_side:
+            kwargs["posSide"] = position_side
+        response = self._trade_api.place_order(**kwargs)
+        self._raise_if_error(response, f"place market order for {instrument_id}")
+        data = response.get("data", [])
+        if not data:
+            raise RuntimeError(f"No order response returned for {instrument_id}")
         return data[0]
 
     @staticmethod

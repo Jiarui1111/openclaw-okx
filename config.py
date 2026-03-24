@@ -25,6 +25,7 @@ class OkxConfig:
     dry_run: bool
     order_side: str
     order_size_contracts: float
+    allow_live_demo_orders: bool
 
     @property
     def flag(self) -> str:
@@ -43,6 +44,7 @@ def load_config() -> OkxConfig:
         dry_run=_to_bool(os.getenv("OPENCLAW_DRY_RUN"), default=True),
         order_side=os.getenv("OPENCLAW_ORDER_SIDE", "buy").strip().lower() or "buy",
         order_size_contracts=float(os.getenv("OPENCLAW_ORDER_SIZE_CONTRACTS", "0.01")),
+        allow_live_demo_orders=_to_bool(os.getenv("OPENCLAW_ALLOW_LIVE_DEMO_ORDERS"), default=False),
     )
 
     missing = [
