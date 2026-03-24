@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from config import load_config
 from exchange import OkxDemoClient
@@ -23,6 +24,11 @@ def configure_logging() -> logging.Logger:
         force=True,
     )
     return logging.getLogger("openclaw")
+
+
+def log_event(logger: logging.Logger, event: str, **fields: Any) -> None:
+    payload = " ".join(f"{key}={value}" for key, value in fields.items())
+    logger.info("event=%s %s", event, payload)
 
 
 def _to_float(value: str | None) -> float:
@@ -131,6 +137,30 @@ def estimate_margin_used(position: dict[str, float | str]) -> float:
     return 0.0
 
 
+def build_order_plan(
+    instrument_id: str,
+    trade_mode: str,
+    side: str,
+    size_contracts: float,
+    instrument: dict[str, str],
+    ticker: dict[str, str],
+) -> dict[str, float | str]:
+    contract_value = _to_float(instrument.get("ctVal"))
+    contract_multiplier = _to_float(instrument.get("ctMult")) or 1.0
+    last_price = _to_float(ticker.get("last"))
+    coin_exposure = size_contracts * contract_value * contract_multiplier
+    notional_usd = coin_exposure * last_price
+    return {
+        "instrument_id": instrument_id,
+        "trade_mode": trade_mode,
+        "side": side,
+        "size_contracts": size_contracts,
+        "coin_exposure": coin_exposure,
+        "notional_usd": notional_usd,
+        "reference_price": last_price,
+    }
+
+
 def main() -> None:
     logger = configure_logging()
     config = load_config()
@@ -140,25 +170,41 @@ def main() -> None:
     positions = client.fetch_positions("SWAP")
     account_config_rows = client.fetch_account_config()
     ticker = client.fetch_ticker("BTC-USDT-SWAP")
-    instrument = client.fetch_instrument("BTC-USDT-SWAP", "SWAP")
+    instrument = client.fetch_instrument(config.instrument_id, "SWAP")
     balance_summary = summarize_balance(balance_rows)
     position_summary, total_position_notional = summarize_positions(positions)
     account_config = summarize_account_config(account_config_rows)
     trade_mode = infer_trade_mode(account_config, positions)
     max_order_size = summarize_size_rows(
         client.fetch_max_order_size(
-            "BTC-USDT-SWAP",
+            config.instrument_id,
             trade_mode,
             leverage=instrument.get("lever"),
         )
     )
     max_available_size = summarize_size_rows(
-        client.fetch_max_available_size("BTC-USDT-SWAP", trade_mode)
+        client.fetch_max_available_size(config.instrument_id, trade_mode)
     )
     contract_value = _to_float(instrument.get("ctVal"))
     contract_multiplier = _to_float(instrument.get("ctMult")) or 1.0
+    order_plan = build_order_plan(
+        instrument_id=config.instrument_id,
+        trade_mode=config.trade_mode,
+        side=config.order_side,
+        size_contracts=config.order_size_contracts,
+        instrument=instrument,
+        ticker=ticker,
+    )
 
     logger.info("OKX connectivity check succeeded.")
+    log_event(
+        logger,
+        "startup",
+        simulated_trading=config.simulated_trading,
+        instrument_id=config.instrument_id,
+        trade_mode=config.trade_mode,
+        dry_run=config.dry_run,
+    )
     logger.info("Simulated trading: %s", config.simulated_trading)
     logger.info("Balance rows returned: %s", len(balance_rows))
     logger.info(
@@ -223,6 +269,44 @@ def main() -> None:
         max_available_size.get("avail_buy_contracts", 0.0) * contract_value * contract_multiplier * _to_float(ticker.get("last")),
         max_available_size.get("avail_sell_contracts", 0.0) * contract_value * contract_multiplier * _to_float(ticker.get("last")),
     )
+    log_event(
+        logger,
+        "order_plan",
+        side=order_plan["side"],
+        size_contracts=order_plan["size_contracts"],
+        coin_exposure=f"{order_plan['coin_exposure']:.4f}",
+        notional_usd=f"{order_plan['notional_usd']:.2f}",
+        reference_price=f"{order_plan['reference_price']:.2f}",
+        mode="dry_run" if config.dry_run else "live",
+    )
+
+    max_contracts_for_side = (
+        max_order_size.get("max_buy_contracts", 0.0)
+        if config.order_side == "buy"
+        else max_order_size.get("max_sell_contracts", 0.0)
+    )
+    if max_contracts_for_side and config.order_size_contracts > max_contracts_for_side:
+        logger.warning(
+            "Configured order size %.2f exceeds current max size %.2f for side=%s",
+            config.order_size_contracts,
+            max_contracts_for_side,
+            config.order_side,
+        )
+        log_event(
+            logger,
+            "order_plan_rejected",
+            reason="size_exceeds_max",
+            configured_size=f"{config.order_size_contracts:.2f}",
+            max_size=f"{max_contracts_for_side:.2f}",
+            side=config.order_side,
+        )
+    elif config.dry_run:
+        logger.info(
+            "Dry-run order plan ready: side=%s size_contracts=%.2f estimated_notional_usd=%.2f",
+            config.order_side,
+            config.order_size_contracts,
+            order_plan["notional_usd"],
+        )
     logger.info(
         "Open swap positions: count=%s total_notional_usd=%.2f",
         len(position_summary),

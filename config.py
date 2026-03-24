@@ -20,6 +20,11 @@ class OkxConfig:
     passphrase: str
     use_server_time: bool
     simulated_trading: bool
+    instrument_id: str
+    trade_mode: str
+    dry_run: bool
+    order_side: str
+    order_size_contracts: float
 
     @property
     def flag(self) -> str:
@@ -33,6 +38,11 @@ def load_config() -> OkxConfig:
         passphrase=os.getenv("OKX_PASSPHRASE", "").strip(),
         use_server_time=_to_bool(os.getenv("OKX_USE_SERVER_TIME"), default=False),
         simulated_trading=_to_bool(os.getenv("OKX_SIMULATED_TRADING"), default=True),
+        instrument_id=os.getenv("OKX_INSTRUMENT_ID", "BTC-USDT-SWAP").strip() or "BTC-USDT-SWAP",
+        trade_mode=os.getenv("OKX_TRADE_MODE", "cross").strip() or "cross",
+        dry_run=_to_bool(os.getenv("OPENCLAW_DRY_RUN"), default=True),
+        order_side=os.getenv("OPENCLAW_ORDER_SIDE", "buy").strip().lower() or "buy",
+        order_size_contracts=float(os.getenv("OPENCLAW_ORDER_SIZE_CONTRACTS", "0.01")),
     )
 
     missing = [
