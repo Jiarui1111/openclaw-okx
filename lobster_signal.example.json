@@ -1,0 +1,7 @@
+{
+  "source": "lobster_ai",
+  "action": "buy",
+  "size_contracts": 0.01,
+  "reason": "breakout_above_range",
+  "confidence": 0.78
+}

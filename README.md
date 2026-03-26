@@ -10,6 +10,7 @@ This project starts with a minimal OKX demo trading connectivity check:
 - connect to OKX demo trading
 - fetch account balance
 - fetch a ticker for `BTC-USDT-SWAP`
+- optionally load a trading signal from `lobster_signal.json`
 
 ## Setup
 
@@ -33,3 +34,4 @@ python app.py
 - This script uses the OKX official Python SDK.
 - Demo trading is enabled with `flag = "1"`.
 - No orders are placed in this step.
+- Signal priority is `lobster_signal.json` first, then `.env` fallback.
