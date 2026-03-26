@@ -122,6 +122,10 @@ def summarize_size_rows(rows: list[dict[str, str]]) -> dict[str, float]:
     }
 
 
+def summarize_pending_orders(orders: list[dict[str, str]], instrument_id: str) -> list[dict[str, str]]:
+    return [order for order in orders if order.get("instId") == instrument_id]
+
+
 def estimate_margin_used(position: dict[str, float | str]) -> float:
     direct_margin = float(position["margin_usd"])
     if direct_margin > 0:
@@ -143,14 +147,16 @@ def build_order_plan(
     trade_mode: str,
     side: str,
     size_contracts: float,
+    entry_price: float,
     instrument: dict[str, str],
     ticker: dict[str, str],
 ) -> dict[str, float | str]:
     contract_value = _to_float(instrument.get("ctVal"))
     contract_multiplier = _to_float(instrument.get("ctMult")) or 1.0
     last_price = _to_float(ticker.get("last"))
+    reference_price = entry_price if entry_price > 0 else last_price
     coin_exposure = size_contracts * contract_value * contract_multiplier
-    notional_usd = coin_exposure * last_price
+    notional_usd = coin_exposure * reference_price
     return {
         "instrument_id": instrument_id,
         "trade_mode": trade_mode,
@@ -158,7 +164,7 @@ def build_order_plan(
         "size_contracts": size_contracts,
         "coin_exposure": coin_exposure,
         "notional_usd": notional_usd,
-        "reference_price": last_price,
+        "reference_price": reference_price,
     }
 
 
@@ -176,11 +182,13 @@ def main() -> None:
 
     balance_rows = client.fetch_balance()
     positions = client.fetch_positions("SWAP")
+    pending_orders = client.fetch_pending_orders("SWAP")
     account_config_rows = client.fetch_account_config()
     ticker = client.fetch_ticker("BTC-USDT-SWAP")
     instrument = client.fetch_instrument(config.instrument_id, "SWAP")
     balance_summary = summarize_balance(balance_rows)
     position_summary, total_position_notional = summarize_positions(positions)
+    relevant_pending_orders = summarize_pending_orders(pending_orders, config.instrument_id)
     account_config = summarize_account_config(account_config_rows)
     trade_mode = infer_trade_mode(account_config, positions)
     max_order_size = summarize_size_rows(
@@ -200,6 +208,7 @@ def main() -> None:
         trade_mode=config.trade_mode,
         side=signal.action,
         size_contracts=signal.size_contracts,
+        entry_price=signal.entry_price,
         instrument=instrument,
         ticker=ticker,
     )
@@ -222,6 +231,9 @@ def main() -> None:
         size_contracts=f"{signal.size_contracts:.2f}",
         confidence=f"{signal.confidence:.2f}",
         reason=signal.reason,
+        entry_price=f"{signal.entry_price:.2f}",
+        stop_loss=f"{signal.stop_loss:.2f}",
+        take_profit=f"{signal.take_profit:.2f}",
     )
     logger.info("Simulated trading: %s", config.simulated_trading)
     logger.info("Balance rows returned: %s", len(balance_rows))
@@ -297,7 +309,72 @@ def main() -> None:
         reference_price=f"{order_plan['reference_price']:.2f}",
         mode="dry_run" if config.dry_run else "live",
         signal_source=signal.source,
+        stop_loss=f"{signal.stop_loss:.2f}",
+        take_profit=f"{signal.take_profit:.2f}",
     )
+
+    logger.info("Pending orders: count=%s", len(relevant_pending_orders))
+
+    if signal.action not in {"buy", "hold"}:
+        logger.warning("Unsupported action=%s. Only buy/hold are allowed.", signal.action)
+        log_event(
+            logger,
+            "signal_rejected",
+            reason="unsupported_action",
+            action=signal.action,
+            signal_source=signal.source,
+        )
+        return
+
+    if signal.action == "hold":
+        logger.info("Hold signal received. No order will be placed.")
+        log_event(
+            logger,
+            "signal_ignored",
+            reason="hold",
+            signal_source=signal.source,
+        )
+        return
+
+    if signal.entry_price <= 0:
+        logger.warning("Buy signal missing a valid entry_price.")
+        log_event(
+            logger,
+            "signal_rejected",
+            reason="missing_entry_price",
+            signal_source=signal.source,
+        )
+        return
+
+    if signal.stop_loss <= 0 or signal.take_profit <= 0:
+        logger.warning("Buy signal missing stop_loss or take_profit.")
+        log_event(
+            logger,
+            "signal_rejected",
+            reason="missing_protection_prices",
+            signal_source=signal.source,
+        )
+        return
+
+    if position_summary:
+        logger.info("Existing position detected. New signal will be ignored.")
+        log_event(
+            logger,
+            "signal_ignored",
+            reason="position_already_open",
+            signal_source=signal.source,
+        )
+        return
+
+    if relevant_pending_orders:
+        logger.info("Pending order already exists. New signal will be ignored.")
+        log_event(
+            logger,
+            "signal_ignored",
+            reason="pending_order_exists",
+            signal_source=signal.source,
+        )
+        return
 
     max_contracts_for_side = (
         max_order_size.get("max_buy_contracts", 0.0)
@@ -321,9 +398,10 @@ def main() -> None:
         )
     elif config.dry_run:
         logger.info(
-            "Dry-run order plan ready: side=%s size_contracts=%.2f estimated_notional_usd=%.2f",
+            "Dry-run order plan ready: side=%s size_contracts=%.2f entry_price=%.2f estimated_notional_usd=%.2f",
             signal.action,
             signal.size_contracts,
+            signal.entry_price,
             order_plan["notional_usd"],
         )
     elif not config.simulated_trading:
@@ -345,19 +423,21 @@ def main() -> None:
             size_contracts=f"{signal.size_contracts:.2f}",
         )
     else:
-        order_result = client.place_market_order(
+        order_result = client.place_limit_order(
             instrument_id=config.instrument_id,
             trade_mode=config.trade_mode,
             side=signal.action,
             size_contracts=signal.size_contracts,
+            price=signal.entry_price,
             position_side=position_side,
         )
         logger.info(
-            "Live demo order placed: ordId=%s clOrdId=%s side=%s size_contracts=%.2f",
+            "Live demo limit order placed: ordId=%s clOrdId=%s side=%s size_contracts=%.2f entry_price=%.2f",
             order_result.get("ordId"),
             order_result.get("clOrdId"),
             signal.action,
             signal.size_contracts,
+            signal.entry_price,
         )
         log_event(
             logger,
@@ -368,6 +448,10 @@ def main() -> None:
             size_contracts=f"{signal.size_contracts:.2f}",
             position_side=position_side or "net",
             signal_source=signal.source,
+            entry_price=f"{signal.entry_price:.2f}",
+            stop_loss=f"{signal.stop_loss:.2f}",
+            take_profit=f"{signal.take_profit:.2f}",
+            order_type="limit",
         )
     logger.info(
         "Open swap positions: count=%s total_notional_usd=%.2f",

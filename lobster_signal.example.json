@@ -3,5 +3,8 @@
   "action": "buy",
   "size_contracts": 0.01,
   "reason": "breakout_above_range",
-  "confidence": 0.78
+  "confidence": 0.78,
+  "entry_price": 70000,
+  "stop_loss": 69300,
+  "take_profit": 71400
 }

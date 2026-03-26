@@ -82,6 +82,11 @@ class OkxDemoClient:
         self._raise_if_error(response, f"fetch max available size for {instrument_id}")
         return response.get("data", [])
 
+    def fetch_pending_orders(self, instrument_type: str = "SWAP") -> list[dict[str, Any]]:
+        response = self._trade_api.get_order_list(instType=instrument_type)
+        self._raise_if_error(response, f"fetch pending orders for {instrument_type}")
+        return response.get("data", [])
+
     def fetch_ticker(self, instrument_id: str) -> dict[str, Any]:
         response = self._market_api.get_ticker(instId=instrument_id)
         self._raise_if_error(response, f"fetch ticker for {instrument_id}")
@@ -98,25 +103,27 @@ class OkxDemoClient:
             raise RuntimeError(f"No instrument details returned for {instrument_id}")
         return data[0]
 
-    def place_market_order(
+    def place_limit_order(
         self,
         instrument_id: str,
         trade_mode: str,
         side: str,
         size_contracts: float,
+        price: float,
         position_side: str | None = None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "instId": instrument_id,
             "tdMode": trade_mode,
             "side": side,
-            "ordType": "market",
+            "ordType": "limit",
+            "px": f"{price}",
             "sz": f"{size_contracts}",
         }
         if position_side:
             kwargs["posSide"] = position_side
         response = self._trade_api.place_order(**kwargs)
-        self._raise_if_error(response, f"place market order for {instrument_id}")
+        self._raise_if_error(response, f"place limit order for {instrument_id}")
         data = response.get("data", [])
         if not data:
             raise RuntimeError(f"No order response returned for {instrument_id}")

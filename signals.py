@@ -17,6 +17,9 @@ class TradingSignal:
     size_contracts: float
     reason: str
     confidence: float
+    entry_price: float
+    stop_loss: float
+    take_profit: float
 
 
 def load_signal_from_file(path: Path = SIGNAL_FILE) -> TradingSignal | None:
@@ -34,6 +37,9 @@ def load_signal_from_file(path: Path = SIGNAL_FILE) -> TradingSignal | None:
         size_contracts=float(payload.get("size_contracts", 0.01)),
         reason=str(payload.get("reason", "file_signal")),
         confidence=float(payload.get("confidence", 0.5)),
+        entry_price=float(payload.get("entry_price", 0)),
+        stop_loss=float(payload.get("stop_loss", 0)),
+        take_profit=float(payload.get("take_profit", 0)),
     )
 
 
@@ -48,4 +54,7 @@ def load_signal(config: OkxConfig) -> TradingSignal:
         size_contracts=config.order_size_contracts,
         reason="manual_env_input",
         confidence=1.0,
+        entry_price=0.0,
+        stop_loss=0.0,
+        take_profit=0.0,
     )
